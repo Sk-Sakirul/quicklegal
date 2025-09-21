@@ -2,7 +2,7 @@ const mongoose = require("mongoose");
 
 const documentTemplateSchema = new mongoose.Schema(
   {
-    name: { type: String, required: true }, // e.g., "NDA Agreement"
+    name: { type: String, required: true }, 
     description: { type: String },
     fields: [{ label: String, type: String, required: Boolean }], // form fields for dynamic filling
     createdBy: {

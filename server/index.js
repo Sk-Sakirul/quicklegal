@@ -1,14 +1,15 @@
-const express = require('express');
-const connectToDB = require('./config/db');
-require('dotenv').config();
+const express = require("express");
+const connectToDB = require("./config/db");
+require("dotenv").config();
 var cookieParser = require("cookie-parser");
-const { notFound, errorHandler } = require('./middlewares/error.middleware');
-const authRouter = require('./routes/auth.route');
-const advocateRouter = require('./routes/advocate.route');
-const bookingRouter = require('./routes/booking.route');
-const documentRouter = require('./routes/document.routes');
-const documentTemplateRouter = require('./routes/documentTemplate.routes');
-const caseRouter = require('./routes/case.routes');
+const { notFound, errorHandler } = require("./middlewares/error.middleware");
+const authRouter = require("./routes/auth.route");
+const advocateRouter = require("./routes/advocate.route");
+const bookingRouter = require("./routes/booking.route");
+const documentRouter = require("./routes/document.routes");
+const documentTemplateRouter = require("./routes/documentTemplate.routes");
+const caseRouter = require("./routes/case.routes");
+const adminRouter = require("./routes/admin.route");
 
 const app = express();
 
@@ -17,18 +18,25 @@ let PORT = process.env.PORT || 5000;
 app.use(express.json());
 app.use(cookieParser());
 
-connectToDB();
+if (process.env.NODE_ENV !== "test") {
+  connectToDB();
+}
 
-app.use('/api/auth', authRouter);
-app.use('/api/advocates', advocateRouter);
-app.use('/api/bookings', bookingRouter);
+app.use("/api/auth", authRouter);
+app.use("/api/advocates", advocateRouter);
+app.use("/api/bookings", bookingRouter);
 app.use("/api/documents", documentRouter);
 app.use("/api/document-templates", documentTemplateRouter);
-app.use('/api/cases', caseRouter);
+app.use("/api/cases", caseRouter);
+app.use("/api/admin", adminRouter);
 
 app.use(notFound);
 app.use(errorHandler);
 
-app.listen(PORT, () => {
+module.exports = app;
+if (process.env.NODE_ENV !== "test") {
+  app.listen(PORT, () => {
+    // const PORT = process.env.PORT || 5000;
     console.log(`Server is running on port http://localhost:${PORT}`);
-})
+  });
+}

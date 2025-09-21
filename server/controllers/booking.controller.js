@@ -1,20 +1,19 @@
 const Advocate = require("../models/advocate.model");
 const Booking = require("../models/booking.model");
+const createPaymentIntent = require("../services/paymentService");
 
-// Create booking with advocate (check availability)
-const createBooking = async (req, res, next) => {
+// Create booking with payment intent
+const createBookingWithPayment = async (req, res, next) => {
   try {
     const { advocateId, date, slot } = req.body;
-    const userId = req.user._id || req.user.id;
 
     // Find advocate
     const advocate = await Advocate.findById(advocateId);
     if (!advocate) {
-      res.status(404);
-      return next(new Error("Advocate not found"));
+      return res.status(404).json({ message: "Advocate not found" });
     }
 
-    // Find availability entry for the given date
+    // 🔹 Step 1: Check advocate availability for the given date
     const availabilityForDate = advocate.availability.find(
       (a) =>
         a.date.toISOString().split("T")[0] ===
@@ -22,61 +21,99 @@ const createBooking = async (req, res, next) => {
     );
 
     if (!availabilityForDate) {
-      res.status(400);
-      return next(new Error("Advocate not available on this date"));
+      return res
+        .status(400)
+        .json({ message: "Advocate not available on this date" });
     }
 
-    // Check if slot exists in that date’s availability
+    // 🔹 Step 2: Validate if requested slot exists in advocate’s availability
     if (!availabilityForDate.slots.includes(slot)) {
-      res.status(400);
-      return next(new Error("Advocate not available at this slot"));
+      return res
+        .status(400)
+        .json({ message: "Invalid slot for this advocate" });
     }
 
-    // Check if slot is already booked
+    // 🔹 Step 3: Check if slot is already confirmed (block double booking)
     const existingBooking = await Booking.findOne({
       advocate: advocateId,
       date,
       slot,
-      status: { $in: ["pending", "confirmed"] },
+      status: "confirmed",
     });
 
     if (existingBooking) {
-      res.status(400);
-      return next(new Error("Slot already booked"));
+      return res.status(400).json({ message: "Slot already booked" });
     }
 
-    // Create booking
+    // Create payment intent
+    const amount = advocate.hourlyRate * 100;
+    const paymentIntent = await createPaymentIntent(amount);
+
+    // Save booking as "pending"
     const booking = await Booking.create({
-      user: userId,
+      user: req.user._id,
       advocate: advocateId,
       date,
       slot,
+      paymentIntentId: paymentIntent.id,
+      paymentStatus: "unpaid",
       status: "pending",
     });
 
-    // Remove booked slot from advocate availability
-    availabilityForDate.slots = availabilityForDate.slots.filter(
-      (s) => s !== slot
-    );
+    res.status(201).json({
+      message: "Booking created, complete payment to confirm",
+      bookingId: booking._id,
+      clientSecret: paymentIntent.client_secret,
+      paymentIntentId:
+        process.env.NODE_ENV === "development" ? paymentIntent.id : undefined,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
 
-    // If no slots left for the day, remove the entire date entry
-    if (availabilityForDate.slots.length === 0) {
-      advocate.availability = advocate.availability.filter(
-        (a) =>
-          a.date.toISOString().split("T")[0] !==
-          new Date(date).toISOString().split("T")[0]
-      );
+
+// Confirm payment and finalize booking
+const confirmPayment = async (req, res, next) => {
+  try {
+    const { bookingId, paymentIntentId } = req.body;
+
+    const booking = await Booking.findById(bookingId);
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found" });
     }
 
-    await advocate.save();
+    // Verify slot availability again (in case multiple pending at same time)
+    const existingBooking = await Booking.findOne({
+      advocate: booking.advocate,
+      date: booking.date,
+      slot: booking.slot,
+      status: "confirmed",
+    });
 
-    res.status(201).json({
-      success: true,
-      message: "Successfully booked",
+    if (existingBooking) {
+      return res
+        .status(400)
+        .json({ message: "Slot already booked by someone else" });
+    }
+
+    const cleanId = paymentIntentId.split("_secret")[0];
+    // Verify payment reference
+    if (cleanId !== booking.paymentIntentId) {
+      return res.status(400).json({ message: "Invalid payment reference" });
+    }
+
+    // Update booking as confirmed
+    booking.paymentStatus = "paid";
+    booking.status = "confirmed";
+    await booking.save();
+
+    res.json({
+      message: "Payment confirmed, booking successful",
       booking,
     });
-  } catch (error) {
-    next(error);
+  } catch (err) {
+    next(err);
   }
 };
 
@@ -103,12 +140,12 @@ const getUserBookings = async (req, res, next) => {
   }
 };
 
-// Get all bookings for an advocate
+// Get all bookings for an advocate by advocate id
 const getBookingsForAdvocate = async (req, res, next) => {
   try {
     const advocateId = req.params.advocateId;
 
-    // Ensure the logged-in user is the same advocate (extra safety)
+    // Ensure the logged-in user is the same advocate 
     const advocate = await Advocate.findOne({ user: req.user.id });
     if (!advocate || advocate._id.toString() !== advocateId) {
       res.status(403);
@@ -116,7 +153,7 @@ const getBookingsForAdvocate = async (req, res, next) => {
     }
 
     const bookings = await Booking.find({ advocate: advocateId })
-      .populate("user", "name email") // show user details
+      .populate("user", "name email") 
       .populate("advocate", "specialization experience");
 
     res.status(200).json({
@@ -128,80 +165,9 @@ const getBookingsForAdvocate = async (req, res, next) => {
   }
 };
 
-// Update booking status (confirmed/cancelled)
-const updateBookingStatus = async (req, res, next) => {
-  try {
-    const bookingId = req.params.bookingId;
-    const { status } = req.body; 
-
-    if (!["confirmed", "cancelled"].includes(status)) {
-      res.status(400);
-      return next(new Error("Invalid status"));
-    }
-
-    const booking = await Booking.findById(bookingId).populate("advocate");
-    if (!booking) {
-      res.status(404);
-      return next(new Error("Booking not found"));
-    }
-
-    // Check role: Advocate can only update their own bookings
-    if (req.user.role === "advocate") {
-      const advocate = await Advocate.findOne({ user: req.user.id });
-      if (
-        !advocate ||
-        advocate._id.toString() !== booking.advocate._id.toString()
-      ) {
-        res.status(403);
-        return next(new Error("Not authorized to update this booking"));
-      }
-    }
-
-    booking.status = status;
-    await booking.save();
-
-    res.status(200).json({
-      success: true,
-      message: `Booking ${status} successfully`,
-      booking,
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
-// Cancel booking (user)
-const cancelBooking = async (req, res, next) => {
-  try {
-    const userId = req.user._id || req.user.id;
-
-    const booking = await Booking.findById(req.params.bookingId);
-    if (!booking) {
-      res.status(404);
-      return next(new Error("Booking not found"));
-    }
-
-    if (booking.user.toString() !== userId.toString()) {
-      res.status(403);
-      return next(new Error("Not authorized to cancel this booking"));
-    }
-
-    booking.status = "cancelled";
-    await booking.save();
-
-    res.status(200).json({
-      success: true,
-      message: "Booking cancelled",
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
 module.exports = {
-  createBooking,
+  createBookingWithPayment,
   getUserBookings,
   getBookingsForAdvocate,
-  updateBookingStatus,
-  cancelBooking,
+  confirmPayment
 };

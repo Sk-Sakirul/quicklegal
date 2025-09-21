@@ -10,6 +10,6 @@ router.get('/', getAdvocates);
 // Get single advocate profile (user)
 router.get('/:advocateId', getAdvocateById);
 // Create/update advocate profile(advocate)
-router.post('/', authenticate, roleMiddleware("advocate"), createOrUpdateAdvocate);
+router.post('/', authenticate, roleMiddleware(["advocate"]), createOrUpdateAdvocate);
 
 module.exports = router;
