@@ -1,6 +1,6 @@
+require("dotenv").config();
 const express = require("express");
 const connectToDB = require("./config/db");
-require("dotenv").config();
 var cookieParser = require("cookie-parser");
 const { notFound, errorHandler } = require("./middlewares/error.middleware");
 const authRouter = require("./routes/auth.route");
@@ -10,6 +10,7 @@ const documentRouter = require("./routes/document.routes");
 const documentTemplateRouter = require("./routes/documentTemplate.routes");
 const caseRouter = require("./routes/case.routes");
 const adminRouter = require("./routes/admin.route");
+const cors = require("cors");
 
 const app = express();
 
@@ -21,6 +22,23 @@ app.use(cookieParser());
 if (process.env.NODE_ENV !== "test") {
   connectToDB();
 }
+
+const url = process.env.BASE_URL;
+
+app.use(
+  cors({
+    origin: `${url}`,
+    methods: ["GET", "POST", "DELETE", "PUT"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "Cache-Control",
+      "Expires",
+      "Pragma",
+    ],
+    credentials: true,
+  })
+);
 
 app.use("/api/auth", authRouter);
 app.use("/api/advocates", advocateRouter);
@@ -36,7 +54,6 @@ app.use(errorHandler);
 module.exports = app;
 if (process.env.NODE_ENV !== "test") {
   app.listen(PORT, () => {
-    // const PORT = process.env.PORT || 5000;
     console.log(`Server is running on port http://localhost:${PORT}`);
   });
 }

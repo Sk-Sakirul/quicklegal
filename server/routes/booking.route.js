@@ -17,7 +17,7 @@ router.get("/user/my", authenticate, getUserBookings);
 
 // Advocate's bookings by advocateId
 router.get(
-  "/advocate/:advocateId",
+  "/advocate",
   authenticate,
   roleMiddleware("advocate"),
   getBookingsForAdvocate
