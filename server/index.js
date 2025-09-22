@@ -23,7 +23,7 @@ if (process.env.NODE_ENV !== "test") {
   connectToDB();
 }
 
-const url = process.env.BASE_URL;
+const url = process.env.BASE_URL || "http://localhost:5173";
 
 app.use(
   cors({
